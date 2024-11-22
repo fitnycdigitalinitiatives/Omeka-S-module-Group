@@ -1,4 +1,6 @@
-<?php declare(strict_types=1);
+<?php
+
+declare(strict_types=1);
 
 /**
  * @todo Replace the two tables "group_user" and "group_resource" by one
@@ -6,6 +8,7 @@
  * thing, but will this improve performance (search with a ternary key)?
  * This will be checked if a new group of something is needed (for sites).
  */
+
 namespace Group;
 
 return [
@@ -84,6 +87,7 @@ return [
     'view_helpers' => [
         'invokables' => [
             'groupSelector' => View\Helper\GroupSelector::class,
+            'groupsForCurrentUser' => View\Helper\GroupsForCurrentUser::class,
         ],
         'factories' => [
             'groupCount' => Service\ViewHelper\GroupCountFactory::class,
@@ -187,12 +191,10 @@ return [
     'js_translate_strings' => [
         'Request too long to process.', // @translate
     ],
-    // Don't edit these options here: copy this key in your own omeka config/local.config.php
-    // and modify options as you want.
     'group' => [
         'config' => [
             // Apply the groups of item sets to items and medias.
-            'group_recursive_item_sets' => true,
+            'group_recursive_item_sets' => false,
             // Apply the item groups to medias. Implied and not taken in account
             // when `group_recursive_item_sets` is true.
             'group_recursive_items' => true,
