@@ -17,7 +17,7 @@ class GroupsForCurrentUser extends AbstractHelper
         $user = $view->identity();
         if ($user) {
             $results = [];
-            $groups = $view->api()->search('groups', ['user_id' => 14])->getContent();
+            $groups = $view->api()->search('groups', ['user_id' => $user->getId()])->getContent();
             foreach ($groups as $group) {
                 $results[$group->name()] = $group->id();
             }
