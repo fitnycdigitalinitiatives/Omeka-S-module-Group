@@ -1,4 +1,6 @@
-<?php declare(strict_types=1);
+<?php
+
+declare(strict_types=1);
 
 namespace Group\Mvc\Controller\Plugin;
 
@@ -41,7 +43,7 @@ class ApplyGroups extends AbstractPlugin
      * @param Acl $acl
      * @param EntityManager $entityManager
      */
-    public function __construct(ApiManager$api, Acl $acl, EntityManager $entityManager)
+    public function __construct(ApiManager $api, Acl $acl, EntityManager $entityManager)
     {
         $this->api = $api;
         $this->acl = $acl;
@@ -167,7 +169,8 @@ class ApplyGroups extends AbstractPlugin
             return null;
         }
         $groups = $this->api
-            ->search('groups',
+            ->search(
+                'groups',
                 ['item_id' => $itemId],
                 ['responseContent' => 'resource']
             )
@@ -194,7 +197,8 @@ class ApplyGroups extends AbstractPlugin
             return $itemSet && $itemSetGroups ? $itemSetGroups : [];
         }
         $groups = $this->api
-            ->search('groups',
+            ->search(
+                'groups',
                 ['item_set_id' => array_keys($itemSets)],
                 ['responseContent' => 'resource']
             )
@@ -344,10 +348,11 @@ class ApplyGroups extends AbstractPlugin
             $firstGroup = reset($groups);
         }
 
-        $isId = preg_match('~^\d+$~', $firstGroup);
+        $isId = preg_match('~^\d+$~', strval($firstGroup));
 
         $groups = $this->api
-            ->search('groups',
+            ->search(
+                'groups',
                 [$isId ? 'id' : 'name' => $groups],
                 ['responseContent' => 'resource']
             )
