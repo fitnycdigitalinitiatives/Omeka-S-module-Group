@@ -62,7 +62,7 @@ class ApplyGroups extends AbstractPlugin
      *
      * Entities are not flushed.
      *
-     * @param Resource|User $entity No action is done with a user.
+     * @param AbstractEntity|Item|ItemSet|Media|User $entity No action is done with a user.
      * @param array $groups A list of group ids, names or objects (no mix).
      * @param string $collectionAction "replace" (default), "remove" or "append".
      * @param bool $aboveGroups If true, items will take groups from the item
@@ -134,6 +134,19 @@ class ApplyGroups extends AbstractPlugin
                     // always on medias too.
                     $this->applyGroupsToItemAndMedia($entity, null, true, null);
                 } elseif ($recursive) {
+                    if (in_array($collectionAction, ['append', 'remove'])) {
+                        $groupEntitiesRepository = $this->entityManager->getRepository(GroupResource::class);
+                        $groupEntities = $groupEntitiesRepository->findBy(['resource' => $entity->getId()]);
+                        $currentGroups = [];
+                        foreach ($groupEntities as $groupEntity) {
+                            $group = $groupEntity->getGroup();
+                            $currentGroups[$group->getId()] = $group;
+                        }
+                        // The repository is not up to date, so update directly.
+                        $groups = $collectionAction === 'append'
+                            ? array_replace($currentGroups, $groups)
+                            : array_diff_key($currentGroups, $groups);
+                    }
                     $this->applyGroupsToItemAndMedia($entity, $groups, false, null);
                 } else {
                     $this->applyGroupsToEntity($entity, $groups, $collectionAction);

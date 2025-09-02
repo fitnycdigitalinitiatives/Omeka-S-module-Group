@@ -1,4 +1,6 @@
-<?php declare(strict_types=1);
+<?php
+
+declare(strict_types=1);
 /*
  * Group
  *
@@ -31,6 +33,7 @@
  * The fact that you are presently reading this means that you have had
  * knowledge of the CeCILL license and that you accept its terms.
  */
+
 namespace Group;
 
 if (!class_exists(\Generic\AbstractModule::class)) {
@@ -231,11 +234,10 @@ class Module extends AbstractModule
                 'api.update.post',
                 [$this, 'handleUpdatePost']
             );
-            // Required for partial batch, since requests are filtered by core.
             $sharedEventManager->attach(
                 $adapter,
-                'api.batch_update.post',
-                [$this, 'handleBatchUpdatePost']
+                'api.preprocess_batch_update',
+                [$this, 'handlePreprocessBatchUpdate']
             );
         }
         // The deletion is managed automatically when not recursive.
@@ -559,7 +561,8 @@ class Module extends AbstractModule
                     ->innerJoin(
                         Group::class,
                         $groupAlias,
-                        'WITH', '1 = 1'
+                        'WITH',
+                        '1 = 1'
                     )
                     ->innerJoin(
                         $groupEntity,
@@ -623,6 +626,15 @@ class Module extends AbstractModule
         $entityManager->flush();
     }
 
+    public function handlePreprocessBatchUpdate(Event $event)
+    {
+        $data = $event->getParam('data');
+        $rawData = $event->getParam('request')->getContent();
+        $data['add_groups'] = isset($rawData['add_groups']) ? $rawData['add_groups'] : [];
+        $data['remove_groups'] = isset($rawData['remove_groups']) ? $rawData['remove_groups'] : [];
+        $event->setParam('data', $data);
+    }
+
     /**
      * Handle hydration for groups data after hydration of an entity.
      *
@@ -638,84 +650,55 @@ class Module extends AbstractModule
         }
 
         $request = $event->getParam('request');
-
-        $aboveGroups = $this->takeGroupsFromAbove($resourceType);
-        $recursive = $this->isRecursive($resourceType);
-
-        // Manage partial update (and avoid a batch issue, without clear).
-        if ($recursive) {
-            if (!$resourceAdapter->shouldHydrate($request, 'o:item_set')) {
-                return;
-            }
-        } else {
-            if (!$resourceAdapter->shouldHydrate($request, 'o-module-group:group')) {
-                return;
-            }
-        }
-
-        $resource = $event->getParam('response')->getContent();
-        $submittedGroups = $request->getValue('o-module-group:group') ?: [];
-
-        $services = $this->getServiceLocator();
-        $controllerPlugins = $services->get('ControllerPluginManager');
-        $applyGroups = $controllerPlugins->get('applyGroups');
-        $applyGroups($resource, $submittedGroups, 'replace', $aboveGroups, $recursive);
-
-        // Since we use api.*.post, the entity manager should be flushed.
-        $entityManager = $services->get('Omeka\EntityManager');
-        $entityManager->flush();
-    }
-
-    /**
-     * Handle hydration for groups data after batch update of an entity.
-     *
-     * @todo Clarify and use acl only.
-     * @param Event $event
-     */
-    public function handleBatchUpdatePost(Event $event): void
-    {
-        $resourceAdapter = $event->getTarget();
-        $resourceType = $resourceAdapter->getEntityClass();
-        if (!$this->checkAcl($resourceType, 'update')) {
-            return;
-        }
-
-        $response = $event->getParam('response');
-        $request = $response->getRequest();
         $data = $request->getContent();
-        if (!empty($data['remove_groups'])) {
-            $groups = $data['remove_groups'];
-            $collectionAction = 'remove';
-        } elseif (!empty($data['add_groups'])) {
-            $groups = $data['add_groups'];
-            $collectionAction = 'append';
+        $resource = $event->getParam('response')->getContent();
+
+        // Check if this is a batch change or not
+        if (isset($data['add_groups']) || isset($data['remove_groups'])) {
+            $changeTypes = ['add_groups', 'remove_groups'];
+
+            foreach ($changeTypes as $changeType) {
+                if (($data[$changeType])) {
+                    $groups = $data[$changeType];
+                    $collectionAction = ($changeType == 'add_groups') ? 'append' : 'remove';
+
+                    $aboveGroups = $this->takeGroupsFromAbove($resourceType);
+                    $recursive = $this->isRecursive($resourceType);
+
+                    $services = $this->getServiceLocator();
+                    $controllerPlugins = $services->get('ControllerPluginManager');
+                    $applyGroups = $controllerPlugins->get('applyGroups');
+                    $applyGroups($resource, $groups, $collectionAction, $aboveGroups, $recursive);
+
+                    // Since we use api.*.post, the entity manager should be flushed.
+                    $entityManager = $services->get('Omeka\EntityManager');
+                    $entityManager->flush();
+                }
+            }
         } else {
-            return;
-        }
+            $recursive = $this->isRecursive($resourceType);
+            // Manage partial update (and avoid a batch issue, without clear).
+            if ($recursive) {
+                if (!$resourceAdapter->shouldHydrate($request, 'o:item_set')) {
+                    return;
+                }
+            } else {
+                if (!$resourceAdapter->shouldHydrate($request, 'o-module-group:group')) {
+                    return;
+                }
+            }
 
-        $aboveGroups = $this->takeGroupsFromAbove($resourceType);
-        $recursive = $this->isRecursive($resourceType);
+            $aboveGroups = $this->takeGroupsFromAbove($resourceType);
+            $submittedGroups = $request->getValue('o-module-group:group') ?: [];
 
-        $resources = $event->getParam('response')->getContent();
+            $services = $this->getServiceLocator();
+            $controllerPlugins = $services->get('ControllerPluginManager');
+            $applyGroups = $controllerPlugins->get('applyGroups');
+            $applyGroups($resource, $submittedGroups, 'replace', $aboveGroups, $recursive);
 
-        $services = $this->getServiceLocator();
-        $entityManager = $services->get('Omeka\EntityManager');
-        $controllerPlugins = $services->get('ControllerPluginManager');
-        $applyGroups = $controllerPlugins->get('applyGroups');
-        foreach ($resources as $resource) {
-            // Resource cannot be managed directly by the entity manager, or
-            // there may be a risk of duplicate. Merge is not enough.
-            $resource = $entityManager->find($resourceType, $resource->getId());
-            $applyGroups($resource, $groups, $collectionAction, $aboveGroups, $recursive);
-        }
-
-        // Since we use api.*.post, the entity manager should be flushed.
-        $entityManager->flush();
-        // The clear avoids issues when there are groups removed and appended
-        // during the same batch process, for item sets with recursive.
-        // TODO Check if entity manager clear is still useful.
-        if ($recursive && in_array($resourceType, [ItemSet::class, Item::class])) {
-            $entityManager->clear();
+            // Since we use api.*.post, the entity manager should be flushed.
+            $entityManager = $services->get('Omeka\EntityManager');
+            $entityManager->flush();
         }
     }
 
@@ -859,7 +842,7 @@ class Module extends AbstractModule
                 'attributes' => [
                     'id' => 'remove-groups',
                     'multiple' => true,
-                    'data-collection-action' => 'remove',
+                    'data-collection-action' => 'replace',
                 ],
             ]);
         }
@@ -874,7 +857,7 @@ class Module extends AbstractModule
                 'attributes' => [
                     'id' => 'add-groups',
                     'multiple' => true,
-                    'data-collection-action' => 'append',
+                    'data-collection-action' => 'replace',
                 ],
             ]);
         }
@@ -900,7 +883,8 @@ class Module extends AbstractModule
     public function displayGroupResourceForm(Event $event): void
     {
         $operation = $event->getName();
-        if (!$this->checkAcl(Resource::class, $operation === 'view.add.form.after' ? 'create' : 'update')
+        if (
+            !$this->checkAcl(Resource::class, $operation === 'view.add.form.after' ? 'create' : 'update')
             || !$this->checkAcl(Resource::class, 'assign')
         ) {
             $this->viewShowAfterResource($event);
@@ -1053,7 +1037,7 @@ class Module extends AbstractModule
             $translator->translate('Recursive item sets: %s'), // @translate
             $recursiveItemSets
                 ? $translator->translate('yes') // @translate
-               : $translator->translate('no') // @translate
+                : $translator->translate('no') // @translate
         );
         $messenger->addSuccess($message);
 
@@ -1096,7 +1080,7 @@ class Module extends AbstractModule
     /**
      * Check if groups are applied from above.
      */
-    protected function takeGroupsFromAbove(string$resourceClass): bool
+    protected function takeGroupsFromAbove(string $resourceClass): bool
     {
         switch ($resourceClass) {
             case ItemSet::class:
